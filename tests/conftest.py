@@ -41,8 +41,30 @@ def H(token):
     return {"Authorization": "Bearer " + token}
 
 
+SECRETS = {}          # (client id, email) -> authenticator secret, so helpers can sign in again after enrolment
+
+
+def totp_now(secret, offset=0):
+    import pyotp, time
+    return pyotp.TOTP(secret).at(time.time() + offset)
+
+
 def staff_login(client, email, pw):
-    return client.post("/api/staff/login", json={"email": email, "password": pw})
+    """Full sign-in including the second factor. Returns the final response ({token, staff}), or the failing one."""
+    r = client.post("/api/staff/login", json={"email": email, "password": pw})
+    if r.status_code != 200:
+        return r
+    j, k = r.json(), (id(client), email.lower())
+    if j.get("mfaSetupRequired"):
+        sh = H(j["setupToken"])
+        secret = client.post("/api/mfa/setup", headers=sh).json()["secret"]
+        SECRETS[k] = secret
+        return client.post("/api/mfa/enable", json={"code": totp_now(secret)}, headers=sh)
+    if j.get("mfaRequired"):
+        # replay protection refuses a code whose 30-second step was already used, so the helper clears the stored step first
+        client.app.state.db.users.update_one({"email": email.lower()}, {"$set": {"mfa_last_step": 0}})
+        return client.post("/api/staff/login/mfa", json={"mfaToken": j["mfaToken"], "code": totp_now(SECRETS[k])})
+    return r
 
 
 def staff_auth(client, email, pw):

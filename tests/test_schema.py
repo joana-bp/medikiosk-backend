@@ -7,7 +7,7 @@ from app.ingest import process_visit
 
 TYPES = {"string": lambda v: isinstance(v, str), "bool": lambda v: isinstance(v, bool), "date": lambda v: isinstance(v, datetime),
          "object": lambda v: isinstance(v, dict), "null": lambda v: v is None, "int": lambda v: isinstance(v, int) and not isinstance(v, bool),
-         "long": lambda v: isinstance(v, int) and not isinstance(v, bool)}
+         "long": lambda v: isinstance(v, int) and not isinstance(v, bool), "array": lambda v: isinstance(v, list)}
 
 
 def problems(schema, doc):

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pymongo.errors import DuplicateKeyError
 from ..common import (ADMIN, CLINIC_STAFF, STAFF_SIDE, SUPER_ADMIN, audit, db_dep, local, new_qr, next_id, now, patient_dep, read_qr, require)
+from ..mfa import reset_account
 from ..schemas import PasswordChange, PatientIn, PatientPatch
 from ..security import hash_password, verify_password
 from ..views import patient_out
@@ -101,6 +102,14 @@ def regenerate_qr(pid: str, request: Request, a=Depends(OPEN_RECORDS), db=Depend
     db.patients.update_one({"_id": pid}, {"$set": {"qr_hash": h, "qr_enc": enc}})
     audit(db, request, a, "QR REGENERATE", pid)
     return {"qrToken": tok}
+
+
+@router.post("/patients/{pid}/reset-mfa")
+def reset_patient_mfa(pid: str, request: Request, a=Depends(OPEN_RECORDS), db=Depends(db_dep)):
+    """For a patient who lost their phone (check their identity first): turns their 2FA off and signs them out."""
+    reset_account(db, "patient", get_patient(db, pid))
+    audit(db, request, a, "MFA RESET", pid)
+    return {"success": True}
 
 
 # ---- the patient's own account (mobile app) ----

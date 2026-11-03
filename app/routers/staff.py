@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pymongo.errors import DuplicateKeyError
 from ..common import ADMIN, CLINIC_STAFF, SUPER_ADMIN, audit, db_dep, next_id, now, require, temp_password
+from ..mfa import reset_account
 from ..schemas import StaffIn, StaffPatch
 from ..security import hash_password
 from ..views import staff_out
@@ -75,6 +76,18 @@ def reset_password(sid: str, request: Request, a=Depends(MANAGERS), db=Depends(d
     db.users.update_one({"_id": sid}, {"$set": {"password_hash": hash_password(pw), "must_change_password": True}})
     audit(db, request, a, "PASSWORD RESET", sid)
     return {"temporaryPassword": pw}
+
+
+@router.post("/staff/{sid}/reset-mfa")
+def reset_staff_mfa(sid: str, request: Request, a=Depends(MANAGERS), db=Depends(db_dep)):
+    """For a lost phone: turns their 2FA off and signs them out. They set it up again at next sign-in.
+    An admin can do this for clinic staff only; a super admin for anyone else too (never for themselves)."""
+    u = get_target(db, a, sid)
+    if u["_id"] == a["_id"]:
+        raise HTTPException(400, "You cannot reset your own two-factor sign-in")
+    reset_account(db, "staff", u)
+    audit(db, request, a, "MFA RESET", sid)
+    return {"success": True}
 
 
 @router.delete("/staff/{sid}")

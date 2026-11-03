@@ -12,13 +12,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .common import now, next_id
+from .common import lockout_disabled, now, next_id
 from .config import Settings
 from .db import ensure_indexes, get_database
 from .ingest import Ingest
 from .transport import TransportSecurity
 from .live import Hub, router as live_router
 from .routers import auth, clinical, kiosks, overview, patients, staff
+from . import mfa
+from .mailer import make_mailer
 from .security import hash_password
 
 log = logging.getLogger("backend")
@@ -35,6 +37,8 @@ def create_app(settings: Settings = None, db=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")   # so our own messages (MQTT connected, errors) show next to uvicorn's
     s = settings or Settings.from_env()
     s.check()
+    if lockout_disabled():
+        log.warning("DISABLE_LOCKOUT is ON: failed sign-ins are NOT blocked. Testing only.")
     db = db if db is not None else get_database(s.mongo_uri, s.mongo_db)
     ensure_indexes(db)
     seed_superadmin(db, s)
@@ -52,6 +56,7 @@ def create_app(settings: Settings = None, db=None):
 
     app = FastAPI(title="MediKiosk backend", version="0.2.0", lifespan=lifespan)
     app.state.db, app.state.settings, app.state.hub = db, s, hub
+    app.state.mailer = make_mailer(s)
     app.add_middleware(TransportSecurity, require_https=s.require_https)    # added first = inside CORS, so its replies still carry CORS headers
     app.add_middleware(CORSMiddleware, allow_origins=list(s.cors_origins), allow_methods=["*"], allow_headers=["*"])
 
@@ -62,5 +67,6 @@ def create_app(settings: Settings = None, db=None):
 
     for r in (auth, patients, staff, kiosks, clinical, overview):
         app.include_router(r.router, prefix="/api")
+    app.include_router(mfa.router, prefix="/api")
     app.include_router(live_router, prefix="/api")
     return app

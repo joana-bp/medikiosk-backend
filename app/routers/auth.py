@@ -3,16 +3,16 @@ from ..common import (CLINIC_STAFF, PATIENT, _account, audit, bearer, check_lock
                       staff_dep)
 from ..schemas import LoginIn, PasswordChange, PatientIn, QrLoginIn
 from ..security import hash_password, verify_password
-from ..views import patient_out, staff_out
+from ..views import patient_out
+from ..mfa import pending_token, setup_token
+from ..sessions import patient_session, staff_session
 from pymongo.errors import DuplicateKeyError
 from ..common import new_qr, next_id
 
 router = APIRouter()
 
 
-def _patient_session(request, p):
-    s = request.app.state.settings
-    return {"token": make_token(s.jwt_secret, p["_id"], "patient", PATIENT, s.jwt_minutes), "patient": patient_out(p)}
+_patient_session = patient_session
 
 
 @router.post("/patient/login")
@@ -24,6 +24,11 @@ def patient_login(body: LoginIn, request: Request, db=Depends(db_dep)):
         record_fail(db, key); audit(db, request, {"email": body.email.lower(), "_role": PATIENT}, "LOGIN FAILED", "patient app")
         raise HTTPException(401, "Wrong email or password")
     clear_fails(db, key); p["_role"] = PATIENT
+    s = request.app.state.settings
+    if p.get("mfa_enabled"):                         # patients who turned 2FA on: step 2 of 2
+        return {"mfaRequired": True, "mfaToken": pending_token(s, p, "patient")}
+    if s.mfa_required_patients:
+        return {"mfaSetupRequired": True, "setupToken": setup_token(s, p, "patient")}
     audit(db, request, p, "LOGIN", "patient app")
     return _patient_session(request, p)
 
@@ -41,6 +46,8 @@ def patient_signup(body: PatientIn, request: Request, db=Depends(db_dep)):
         raise HTTPException(409, "That email is already registered")
     doc["_role"] = PATIENT
     audit(db, request, doc, "PATIENT SIGNUP", doc["_id"])
+    if s.mfa_required_patients:
+        return {"mfaSetupRequired": True, "setupToken": setup_token(s, doc, "patient"), "patient": patient_out(doc)}
     return _patient_session(request, doc)
 
 
@@ -69,10 +76,11 @@ def staff_login(body: LoginIn, request: Request, db=Depends(db_dep)):
         record_fail(db, key); audit(db, request, {"email": body.email.lower(), "_role": "unknown"}, "LOGIN FAILED", "staff console")
         raise HTTPException(401, "Wrong email or password")
     clear_fails(db, key)
-    db.users.update_one({"_id": u["_id"]}, {"$set": {"last_active": now()}})
-    u["_role"] = u["access_role"]; u["last_active"] = now()
-    audit(db, request, u, "LOGIN", "staff console")
-    return {"token": make_token(s.jwt_secret, u["_id"], "staff", u["access_role"], s.jwt_minutes), "staff": staff_out(u)}
+    if u.get("mfa_enabled"):                         # step 2 of 2: the code from the authenticator app (or a recovery code)
+        return {"mfaRequired": True, "mfaToken": pending_token(s, u)}
+    if s.mfa_required_staff:                         # first sign-in: they must set up 2FA before getting a session
+        return {"mfaSetupRequired": True, "setupToken": setup_token(s, u)}
+    return staff_session(request, db, u)
 
 
 @router.post("/staff/change-password")

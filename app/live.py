@@ -51,6 +51,8 @@ def _staff_from_token(app, token):
     if p["kind"] != "staff":
         return None
     u = app.state.db.users.find_one({"_id": p["sub"]})
+    if u and p.get("tv", 0) != u.get("token_version", 0):
+        return None
     return u if u and u.get("active", True) and u.get("access_role") == CLINIC_STAFF else None
 
 

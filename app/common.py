@@ -1,5 +1,5 @@
 """Shared helpers: roles, audit log, sign-in lockout, tokens and small formatting functions."""
-import base64, hashlib, re, secrets
+import base64, hashlib, logging, os, re, secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -64,7 +64,8 @@ def temp_password():
 
 # ---------- audit ----------
 SEVERITY = {"LOGIN FAILED": "Warning", "ACCOUNT LOCKED": "Critical", "PATIENT DELETE": "Warning", "STAFF DELETE": "Warning",
-            "KIOSK REMOVE": "Warning", "TIER OVERRIDE": "Warning", "QR REGENERATE": "Warning", "QR VIEW": "Warning"}
+            "KIOSK REMOVE": "Warning", "TIER OVERRIDE": "Warning", "QR REGENERATE": "Warning", "QR VIEW": "Warning",
+            "MFA FAILED": "Warning", "MFA DISABLE": "Warning", "MFA RESET": "Warning", "RECOVERY CODE USED": "Warning"}
 
 
 def audit(db, request, who, action, target="—", details=None):
@@ -75,7 +76,15 @@ def audit(db, request, who, action, target="—", details=None):
 
 
 # ---------- sign-in lockout (5 wrong passwords -> 15 minutes) ----------
+def lockout_disabled():
+    """TESTING ONLY: DISABLE_LOCKOUT=1 turns off the 'too many failed attempts' block (passwords, QR and 2FA codes).
+    Never set it on a real server. Remove the variable and restart to get the lockout back."""
+    return os.getenv("DISABLE_LOCKOUT", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def check_lock(db, key):
+    if lockout_disabled():
+        return
     r = db.login_attempts.find_one({"_id": key})
     if r and r["count"] >= MAX_FAILS:
         raise HTTPException(429, "Too many failed attempts. Try again in 15 minutes.")
@@ -90,9 +99,11 @@ def clear_fails(db, key):
 
 
 # ---------- tokens and QR secrets ----------
-def make_token(secret, sub, kind, role, minutes):
+def make_token(secret, sub, kind, role, minutes, tv=0):
+    """kind: staff / patient (a real session), or mfa_pending / mfa_setup (short-lived, only usable on the 2FA endpoints).
+    tv = the account's token_version; bumping it on the account signs out every older session."""
     t = now()
-    return jwt.encode({"sub": sub, "kind": kind, "role": role, "iat": t, "exp": t + timedelta(minutes=minutes)}, secret, "HS256")
+    return jwt.encode({"sub": sub, "kind": kind, "role": role, "tv": tv, "iat": t, "exp": t + timedelta(minutes=minutes)}, secret, "HS256")
 
 
 def _fernet(s):
@@ -138,6 +149,8 @@ def _account(request, creds, db, kind):
     a = db.users.find_one({"_id": p["sub"]}) if kind == "staff" else db.patients.find_one({"_id": p["sub"]})
     if not a or not a.get("active", True):
         raise HTTPException(401, "Account disabled")
+    if p.get("tv", 0) != a.get("token_version", 0):
+        raise HTTPException(401, "Session expired or invalid")        # signed out by a 2FA change / reset
     a["_role"] = a["access_role"] if kind == "staff" else PATIENT
     return a
 

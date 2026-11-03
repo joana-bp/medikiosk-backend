@@ -10,3 +10,4 @@ pydantic[email]>=2
 pytest
 mongomock
 httpx
+pyotp

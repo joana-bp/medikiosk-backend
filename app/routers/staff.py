@@ -15,6 +15,10 @@ def manageable(actor, target_role):
     return actor["_role"] == SUPER_ADMIN or target_role == CLINIC_STAFF
 
 
+def username_taken(db, username, except_id=None):
+    return db.users.find_one({"username": username, "_id": {"$ne": except_id}}) is not None
+
+
 def get_target(db, actor, sid):
     u = db.users.find_one({"_id": sid})
     if not u or not manageable(actor, u["access_role"]):
@@ -27,7 +31,7 @@ def list_staff(search: str = Query("", max_length=60), a=Depends(MANAGERS), db=D
     rows = [u for u in db.users.find({}).sort("name", 1) if manageable(a, u["access_role"])]
     t = search.strip().lower()
     if t:
-        rows = [u for u in rows if t in u["name"].lower() or t in u["email"] or t in u["_id"].lower()]
+        rows = [u for u in rows if t in u["name"].lower() or t in u["email"] or t in u.get("username", "") or t in u["_id"].lower()]
     return [staff_out(u) for u in rows]
 
 
@@ -35,14 +39,18 @@ def list_staff(search: str = Query("", max_length=60), a=Depends(MANAGERS), db=D
 def create_staff(body: StaffIn, request: Request, a=Depends(MANAGERS), db=Depends(db_dep)):
     if not manageable(a, body.accessRole):
         raise HTTPException(403, "Only a super admin can create admin accounts")
+    if body.username and username_taken(db, body.username):
+        raise HTTPException(409, "That username is already taken")
     pw = temp_password()
     doc = {"_id": next_id(db, "staff", "S-", 4), "name": body.name.strip(), "email": body.email.lower(), "clinic": body.clinic,
            "access_role": body.accessRole, "password_hash": hash_password(pw), "active": True, "must_change_password": True,
            "last_active": None, "created_at": now(), "created_by": a["email"]}
+    if body.username:                                       # never store an empty one: the unique index ignores accounts without the field
+        doc["username"] = body.username
     try:
         db.users.insert_one(doc)
-    except DuplicateKeyError:
-        raise HTTPException(409, "That email is already used by another account")
+    except DuplicateKeyError as e:
+        raise HTTPException(409, "That username is already taken" if "username" in str(e) else "That email is already used by another account")
     audit(db, request, a, "STAFF CREATE", f"{doc['_id']} {doc['name']}", {"access_role": body.accessRole})
     return {**staff_out(doc), "temporaryPassword": pw}          # shown once; the person must change it at first sign-in
 
@@ -56,6 +64,10 @@ def update_staff(sid: str, body: StaffPatch, request: Request, a=Depends(MANAGER
             sets[col] = getattr(body, f)
     if body.email:
         sets["email"] = body.email.lower()
+    if body.username:
+        if username_taken(db, body.username, sid):
+            raise HTTPException(409, "That username is already taken")
+        sets["username"] = body.username
     if body.status is not None:
         if u["_id"] == a["_id"]:
             raise HTTPException(400, "You cannot change your own status")
@@ -63,8 +75,8 @@ def update_staff(sid: str, body: StaffPatch, request: Request, a=Depends(MANAGER
     if sets:
         try:
             db.users.update_one({"_id": sid}, {"$set": sets})
-        except DuplicateKeyError:
-            raise HTTPException(409, "That email is already used by another account")
+        except DuplicateKeyError as e:
+            raise HTTPException(409, "That username is already taken" if "username" in str(e) else "That email is already used by another account")
     audit(db, request, a, "STAFF UPDATE", sid, {"fields": sorted(sets)})
     return staff_out(db.users.find_one({"_id": sid}))
 

@@ -226,7 +226,7 @@ def test_dashboard_numbers_and_recent_activity(db, client, root, admin, nurse):
 
 
 def test_patient_self_service(client):
-    r = client.post("/api/patient/signup", json={"firstName": "Ana", "lastName": "Cruz", "email": "ana@x.io", "password": "password123"})
+    r = client.post("/api/patient/signup", json={"firstName": "Ana", "lastName": "Cruz", "email": "ana@x.io", "username": "ana.x", "password": "password123"})
     h = {"Authorization": "Bearer " + r.json()["token"]}
     assert client.patch("/api/patient/me", json={"address": "Cebu"}, headers=h).json()["address"] == "Cebu"
     assert client.post("/api/patient/change-password", json={"currentPassword": "bad", "newPassword": "newpass1234"}, headers=h).status_code == 400

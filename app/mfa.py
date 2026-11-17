@@ -235,8 +235,12 @@ def mfa_setup(request: Request, who=Depends(actor), db=Depends(db_dep)):
     if a.get("mfa_enabled"):
         raise HTTPException(409, "Two-factor is already on")
     s = request.app.state.settings
-    secret = new_secret()
-    db[SIDES[side]["coll"]].update_one({"_id": a["_id"]}, {"$set": {"mfa_pending_enc": encrypt(s, secret)}})
+    coll = db[SIDES[side]["coll"]]
+    # Keep ONE pending secret until it is enabled: calling this again (a page that re-renders, a second tab, a double request)
+    # must show the same QR code, otherwise the code the person scanned stops matching what the server stored.
+    # The filter makes the first writer win even when two requests arrive together.
+    coll.update_one({"_id": a["_id"], "mfa_pending_enc": {"$exists": False}}, {"$set": {"mfa_pending_enc": encrypt(s, new_secret())}})
+    secret = decrypt(s, coll.find_one({"_id": a["_id"]})["mfa_pending_enc"])
     return {"secret": secret, "otpauthUri": pyotp.TOTP(secret).provisioning_uri(name=a["email"], issuer_name=s.mfa_issuer)}
 
 

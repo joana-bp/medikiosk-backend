@@ -80,10 +80,12 @@ def make_staff(client, root, email, access="clinic_staff"):
 
 
 PATIENT = {"firstName": "Ana", "lastName": "Cruz", "middleName": "L.", "address": "Canitoan", "birthday": "1998-04-02", "sex": "Female",
-           "bloodType": "O+", "email": "ana@example.com", "password": "patient-pass-1"}
+           "bloodType": "O+", "email": "ana@example.com", "username": "ana.cruz", "password": "patient-pass-1"}
 
 
 def make_patient(client, **kw):
+    if "email" in kw and "username" not in kw:          # another patient: give them their own username too
+        kw["username"] = "pt." + kw["email"].split("@")[0].lower()
     r = client.post("/api/patient/signup", json={**PATIENT, **kw})
     assert r.status_code == 201, r.text
     return r.json()["patient"]["id"], H(r.json()["token"])

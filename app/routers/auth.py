@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from ..common import (CLINIC_STAFF, PATIENT, _account, audit, bearer, check_lock, clear_fails, db_dep, make_token, now, parse_qr, qr_hash, record_fail,
                       staff_dep)
-from ..schemas import LoginIn, PasswordChange, PatientIn, QrLoginIn
+from ..schemas import PasswordChange, PatientIn, QrLoginIn, SignInIn
 from ..security import hash_password, verify_password
 from ..views import patient_out
 from ..mfa import pending_token, setup_token
@@ -16,13 +16,14 @@ _patient_session = patient_session
 
 
 @router.post("/patient/login")
-def patient_login(body: LoginIn, request: Request, db=Depends(db_dep)):
-    key = f"patient:{body.email.lower()}"
+def patient_login(body: SignInIn, request: Request, db=Depends(db_dep)):
+    who = body.identifier.strip().lower()                # an email (has an "@") or a username (never has one)
+    key = f"patient:{who}"
     check_lock(db, key)
-    p = db.patients.find_one({"email": body.email.lower()})
+    p = db.patients.find_one({"email": who} if "@" in who else {"username": who})
     if not (verify_password(body.password, p and p.get("password_hash")) and p and p.get("active", True)):
-        record_fail(db, key); audit(db, request, {"email": body.email.lower(), "_role": PATIENT}, "LOGIN FAILED", "patient app")
-        raise HTTPException(401, "Wrong email or password")
+        record_fail(db, key); audit(db, request, {"email": who, "_role": PATIENT}, "LOGIN FAILED", "patient app")
+        raise HTTPException(401, "Wrong email, username or password")
     clear_fails(db, key); p["_role"] = PATIENT
     s = request.app.state.settings
     if p.get("mfa_enabled"):                         # patients who turned 2FA on: step 2 of 2
@@ -36,14 +37,17 @@ def patient_login(body: LoginIn, request: Request, db=Depends(db_dep)):
 @router.post("/patient/signup", status_code=201)
 def patient_signup(body: PatientIn, request: Request, db=Depends(db_dep)):
     s = request.app.state.settings
+    if db.patients.find_one({"username": body.username}):
+        raise HTTPException(409, "That username is already taken")
     tok, h, enc = new_qr(s)
     doc = {"_id": next_id(db, "patient", "P-", 5), "first_name": body.firstName.strip(), "middle_name": body.middleName.strip(),
            "last_name": body.lastName.strip(), "birthday": body.birthday, "sex": body.sex, "blood_type": body.bloodType, "address": body.address,
            "email": body.email.lower(), "password_hash": hash_password(body.password), "qr_hash": h, "qr_enc": enc, "active": True, "created_at": now()}
+    doc["username"] = body.username
     try:
         db.patients.insert_one(doc)
-    except DuplicateKeyError:
-        raise HTTPException(409, "That email is already registered")
+    except DuplicateKeyError as e:
+        raise HTTPException(409, "That username is already taken" if "username" in str(e) else "That email is already registered")
     doc["_role"] = PATIENT
     audit(db, request, doc, "PATIENT SIGNUP", doc["_id"])
     if s.mfa_required_patients:
@@ -67,14 +71,15 @@ def patient_login_qr(body: QrLoginIn, request: Request, db=Depends(db_dep)):
 
 
 @router.post("/staff/login")
-def staff_login(body: LoginIn, request: Request, db=Depends(db_dep)):
+def staff_login(body: SignInIn, request: Request, db=Depends(db_dep)):
     s = request.app.state.settings
-    key = f"staff:{body.email.lower()}"
+    who = body.identifier.strip().lower()                # an email (has an "@") or a username (never has one)
+    key = f"staff:{who}"
     check_lock(db, key)
-    u = db.users.find_one({"email": body.email.lower()})
+    u = db.users.find_one({"email": who} if "@" in who else {"username": who})
     if not (verify_password(body.password, u and u.get("password_hash")) and u and u.get("active", True)):
-        record_fail(db, key); audit(db, request, {"email": body.email.lower(), "_role": "unknown"}, "LOGIN FAILED", "staff console")
-        raise HTTPException(401, "Wrong email or password")
+        record_fail(db, key); audit(db, request, {"email": who, "_role": "unknown"}, "LOGIN FAILED", "staff console")
+        raise HTTPException(401, "Wrong email, username or password")
     clear_fails(db, key)
     if u.get("mfa_enabled"):                         # step 2 of 2: the code from the authenticator app (or a recovery code)
         return {"mfaRequired": True, "mfaToken": pending_token(s, u)}

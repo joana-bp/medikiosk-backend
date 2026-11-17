@@ -16,7 +16,9 @@ def ensure_indexes(db):
     db.visits.create_index([("patient_ref", 1), ("captured_at", -1)])
     db.visits.create_index([("kiosk_id", 1), ("captured_at", -1)])
     db.users.create_index("email", unique=True)               # staff-side accounts (clinic_staff, admin, super_admin)
+    db.users.create_index("username", unique=True, sparse=True)   # optional sign-in name; sparse = accounts without one don't clash
     db.patients.create_index("email", unique=True)
+    db.patients.create_index("username", unique=True, sparse=True)   # optional sign-in name for the mobile app
     db.patients.create_index("qr_hash", unique=True)
     db.kiosks.create_index("kiosk_id", unique=True)
     db.audit_logs.create_index([("at", -1)])
@@ -36,13 +38,13 @@ VALIDATORS = {
     "patients": _schema(["first_name", "last_name", "email", "password_hash", "qr_hash", "qr_enc", "active", "created_at"], {
         "first_name": {"bsonType": STR}, "middle_name": {"bsonType": STR}, "last_name": {"bsonType": STR},
         "birthday": {"bsonType": [STR, "null"]}, "sex": {"bsonType": [STR, "null"]}, "blood_type": {"bsonType": [STR, "null"]},
-        "address": {"bsonType": STR}, "email": {"bsonType": STR}, "password_hash": {"bsonType": STR},
+        "address": {"bsonType": STR}, "email": {"bsonType": STR}, "username": {"bsonType": STR}, "password_hash": {"bsonType": STR},
         "qr_hash": {"bsonType": STR}, "qr_enc": {"bsonType": STR}, "active": {"bsonType": BOOL}, "created_at": {"bsonType": DATE},
         "mfa_enabled": {"bsonType": BOOL}, "mfa_secret_enc": {"bsonType": STR}, "mfa_pending_enc": {"bsonType": STR},
         "mfa_last_step": {"bsonType": INT}, "recovery_hashes": {"bsonType": "array"}, "email_otp": {"bsonType": OBJ},
         "token_version": {"bsonType": INT}}),
     "users": _schema(["name", "email", "access_role", "password_hash", "active"], {
-        "name": {"bsonType": STR}, "email": {"bsonType": STR}, "clinic": {"bsonType": STR}, "password_hash": {"bsonType": STR},
+        "name": {"bsonType": STR}, "email": {"bsonType": STR}, "username": {"bsonType": STR}, "clinic": {"bsonType": STR}, "password_hash": {"bsonType": STR},
         "access_role": {"enum": ["clinic_staff", "admin", "super_admin"]}, "active": {"bsonType": BOOL},
         "must_change_password": {"bsonType": BOOL}, "last_active": {"bsonType": [DATE, "null"]},
         "mfa_enabled": {"bsonType": BOOL}, "mfa_secret_enc": {"bsonType": STR}, "mfa_pending_enc": {"bsonType": STR},

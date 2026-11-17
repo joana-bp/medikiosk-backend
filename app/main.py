@@ -39,6 +39,8 @@ def create_app(settings: Settings = None, db=None):
     s.check()
     if lockout_disabled():
         log.warning("DISABLE_LOCKOUT is ON: failed sign-ins are NOT blocked. Testing only.")
+    if s.mfa_disabled:
+        log.warning("MFA_DISABLED is ON: two-factor sign-in is SKIPPED for everyone. Temporary only, set MFA_DISABLED=0 to turn it back on.")
     db = db if db is not None else get_database(s.mongo_uri, s.mongo_db)
     ensure_indexes(db)
     seed_superadmin(db, s)

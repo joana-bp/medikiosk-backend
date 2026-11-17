@@ -26,9 +26,9 @@ def patient_login(body: SignInIn, request: Request, db=Depends(db_dep)):
         raise HTTPException(401, "Wrong email, username or password")
     clear_fails(db, key); p["_role"] = PATIENT
     s = request.app.state.settings
-    if p.get("mfa_enabled"):                         # patients who turned 2FA on: step 2 of 2
+    if p.get("mfa_enabled") and not s.mfa_disabled:   # patients who turned 2FA on: step 2 of 2
         return {"mfaRequired": True, "mfaToken": pending_token(s, p, "patient")}
-    if s.mfa_required_patients:
+    if s.mfa_required_patients and not s.mfa_disabled:
         return {"mfaSetupRequired": True, "setupToken": setup_token(s, p, "patient")}
     audit(db, request, p, "LOGIN", "patient app")
     return _patient_session(request, p)
@@ -50,7 +50,7 @@ def patient_signup(body: PatientIn, request: Request, db=Depends(db_dep)):
         raise HTTPException(409, "That username is already taken" if "username" in str(e) else "That email is already registered")
     doc["_role"] = PATIENT
     audit(db, request, doc, "PATIENT SIGNUP", doc["_id"])
-    if s.mfa_required_patients:
+    if s.mfa_required_patients and not s.mfa_disabled:
         return {"mfaSetupRequired": True, "setupToken": setup_token(s, doc, "patient"), "patient": patient_out(doc)}
     return _patient_session(request, doc)
 
@@ -81,9 +81,9 @@ def staff_login(body: SignInIn, request: Request, db=Depends(db_dep)):
         record_fail(db, key); audit(db, request, {"email": who, "_role": "unknown"}, "LOGIN FAILED", "staff console")
         raise HTTPException(401, "Wrong email, username or password")
     clear_fails(db, key)
-    if u.get("mfa_enabled"):                         # step 2 of 2: the code from the authenticator app (or a recovery code)
+    if u.get("mfa_enabled") and not s.mfa_disabled:   # step 2 of 2: the code from the authenticator app (or a recovery code)
         return {"mfaRequired": True, "mfaToken": pending_token(s, u)}
-    if s.mfa_required_staff:                         # first sign-in: they must set up 2FA before getting a session
+    if s.mfa_required_staff and not s.mfa_disabled:  # first sign-in: they must set up 2FA before getting a session
         return {"mfaSetupRequired": True, "setupToken": setup_token(s, u)}
     return staff_session(request, db, u)
 

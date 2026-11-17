@@ -28,6 +28,7 @@ class Settings:
     mfa_required_staff: bool = True          # staff-side accounts must use two-factor sign-in (set MFA_REQUIRED_STAFF=0 only while rolling out)
     mfa_issuer: str = "MediKiosk"            # the name an authenticator app shows
     mfa_required_patients: bool = False      # patients may turn 2FA on themselves; set MFA_REQUIRED_PATIENTS=1 to make it compulsory
+    mfa_disabled: bool = False               # TEMPORARY: MFA_DISABLED=1 skips two-factor at sign-in for everyone (saved 2FA is kept)
     mfa_email_fallback: bool = False         # emailed sign-in code for someone who lost their authenticator phone (needs SMTP_*)
     smtp_host: str = ""
     smtp_port: int = 587
@@ -47,7 +48,7 @@ class Settings:
             mqtt_password=e("MQTT_PASSWORD", ""), mqtt_tls=_flag("MQTT_TLS"), mqtt_ca_file=e("MQTT_CA_FILE", ""),
             qr_secret=e("QR_SECRET", ""), tz_offset_hours=int(e("TZ_OFFSET_HOURS", "8")),
             require_https=_flag("REQUIRE_HTTPS"), mfa_required_staff=_flag("MFA_REQUIRED_STAFF", "1"), mfa_issuer=e("MFA_ISSUER", "MediKiosk"),
-            mfa_required_patients=_flag("MFA_REQUIRED_PATIENTS"), mfa_email_fallback=_flag("MFA_EMAIL_FALLBACK"),
+            mfa_required_patients=_flag("MFA_REQUIRED_PATIENTS"), mfa_email_fallback=_flag("MFA_EMAIL_FALLBACK"), mfa_disabled=_flag("MFA_DISABLED"),
             smtp_host=e("SMTP_HOST", ""), smtp_port=int(e("SMTP_PORT", "587")), smtp_username=e("SMTP_USERNAME", ""),
             smtp_password=e("SMTP_PASSWORD", ""), smtp_from=e("SMTP_FROM", ""),
             cors_origins=tuple(o.strip() for o in e("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()))
